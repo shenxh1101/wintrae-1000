@@ -38,6 +38,7 @@ export default function Drills() {
   const { drills, buildings, persons, addDrill, updateDrill, toggleDrillCheckIn, updateDrillScore, addDrillIssue, updateDrillIssue } = useFireStore()
   const [searchParams] = useSearchParams()
   const [selectedDrillId, setSelectedDrillId] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<string>('全部')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [activeTab, setActiveTab] = useState<typeof tabs[number]>('签到')
   const [issueText, setIssueText] = useState('')
@@ -49,13 +50,13 @@ export default function Drills() {
 
   useEffect(() => {
     const statusParam = searchParams.get('status') as Drill['status'] | null
-    if (statusParam && !selectedDrillId) {
-      const match = drills.find((d) => d.status === statusParam)
-      if (match) setSelectedDrillId(match.id)
+    if (statusParam && ['计划中', '进行中', '已完成'].includes(statusParam)) {
+      setStatusFilter(statusParam)
     }
-  }, [searchParams, drills])
+  }, [searchParams])
 
   const selectedDrill = drills.find((d) => d.id === selectedDrillId) ?? null
+  const filteredDrills = statusFilter === '全部' ? drills : drills.filter(d => d.status === statusFilter)
   const buildingName = (id: string) => buildings.find((b) => b.id === id)?.name ?? '未知'
   const personName = (id: string) => persons.find((p) => p.id === id)?.name ?? '未知'
 
@@ -115,8 +116,17 @@ export default function Drills() {
         </button>
       </div>
 
+      <div className="flex items-center gap-3">
+        {['全部', '计划中', '进行中', '已完成'].map(s => (
+          <button key={s} onClick={() => setStatusFilter(s)}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${statusFilter === s ? 'bg-fire-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-100'}`}>
+            {s}
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {drills.map((drill) => {
+        {filteredDrills.map((drill) => {
           const Icon = statusIcon[drill.status]
           const dCheckedIn = drill.participants.filter((p) => p.checkedIn).length
           const dTotal = drill.participants.length || 1

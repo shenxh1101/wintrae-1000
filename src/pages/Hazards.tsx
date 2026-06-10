@@ -311,12 +311,13 @@ export default function Hazards() {
   }), [hazards, statusFilter, levelFilter, buildingFilter, search, buildingMap])
 
   const actionBtn = (h: Hazard) => {
+    const viewBtn = <button onClick={() => setDetailTarget(h)} className="rounded-md bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-100">查看</button>
     switch (h.status) {
-      case '待分派': return <button onClick={() => setAssignTarget(h)} className="rounded-md bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100">分派</button>
-      case '整改中': return <button onClick={() => setRectifyTarget(h)} className="rounded-md bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100">提交整改</button>
-      case '待复查': return <button onClick={() => setRecheckTarget(h)} className="rounded-md bg-purple-50 px-3 py-1 text-xs font-medium text-purple-700 hover:bg-purple-100">复查</button>
-      case '已关闭': return <button onClick={() => setDetailTarget(h)} className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">查看</button>
-      case '已超期': return <button onClick={() => setAssignTarget(h)} className="rounded-md bg-red-50 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100">催办</button>
+      case '待分派': return <div className="flex gap-1.5">{viewBtn}<button onClick={() => setAssignTarget(h)} className="rounded-md bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100">分派</button></div>
+      case '整改中': return <div className="flex gap-1.5">{viewBtn}<button onClick={() => setRectifyTarget(h)} className="rounded-md bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100">整改</button></div>
+      case '待复查': return <div className="flex gap-1.5">{viewBtn}<button onClick={() => setRecheckTarget(h)} className="rounded-md bg-purple-50 px-2.5 py-1 text-xs font-medium text-purple-700 hover:bg-purple-100">复查</button></div>
+      case '已关闭': return <div className="flex gap-1.5">{viewBtn}</div>
+      case '已超期': return <div className="flex gap-1.5">{viewBtn}<button onClick={() => setAssignTarget(h)} className="rounded-md bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-100">催办</button></div>
     }
   }
 
