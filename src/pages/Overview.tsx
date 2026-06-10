@@ -10,6 +10,9 @@ import {
   Shield,
   Bell,
   ArrowRight,
+  Award,
+  Wrench,
+  Clock,
 } from 'lucide-react'
 import { useFireStore } from '@/store'
 
@@ -42,21 +45,27 @@ interface TodoCardProps {
   count: number
   label: string
   color: string
+  to: string
 }
 
-function TodoCard({ icon, count, label, color }: TodoCardProps) {
+function TodoCard({ icon, count, label, color, to }: TodoCardProps) {
+  const navigate = useNavigate()
   return (
-    <div className="card-hover rounded-xl bg-white p-5 shadow-sm">
+    <button
+      onClick={() => navigate(to)}
+      className="card-hover w-full rounded-xl bg-white p-5 shadow-sm text-left"
+    >
       <div className="flex items-center gap-4">
         <div className={`flex h-11 w-11 items-center justify-center rounded-lg ${color}`}>
           {icon}
         </div>
-        <div>
+        <div className="flex-1">
           <p className="text-2xl font-bold text-slate-800">{count}</p>
           <p className="text-sm text-slate-500">{label}</p>
         </div>
+        <ArrowRight className="h-4 w-4 text-slate-300" />
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -82,7 +91,7 @@ function QuickAction({ icon, label, to, color }: QuickActionProps) {
 }
 
 export default function Overview() {
-  const { buildings, hazards, drills, alarms, inspectionRecords } = useFireStore()
+  const { buildings, hazards, drills, alarms, inspectionRecords, certificates, maintenanceRecords, facilities } = useFireStore()
   const navigate = useNavigate()
 
   const buildingMap = useMemo(
@@ -95,6 +104,7 @@ export default function Overview() {
   const pendingRectification = hazards.filter((h) => h.status === '整改中').length
   const pendingRecheck = hazards.filter((h) => h.status === '待复查').length
   const pendingDrill = drills.filter((d) => d.status === '计划中').length
+  const overdueHazards = hazards.filter((h) => h.status === '已超期').length
 
   const inspectedBuildingIds = new Set(inspectionRecords.map((r) => r.buildingId))
   const pendingInspection = buildings.filter((b) => !inspectedBuildingIds.has(b.id)).length
@@ -103,6 +113,20 @@ export default function Overview() {
     () => [...alarms].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 6),
     [alarms]
   )
+
+  const expiringCerts = useMemo(
+    () => certificates.filter((c) => c.status === '临期' || c.status === '已过期'),
+    [certificates]
+  )
+
+  const expiringMaintenance = useMemo(() => {
+    const now = new Date()
+    const thirtyDays = 30 * 86400000
+    return maintenanceRecords.filter((m) => {
+      const next = new Date(m.nextDate).getTime()
+      return next - now.getTime() < thirtyDays
+    })
+  }, [maintenanceRecords])
 
   const gaugeData = RISK_LABELS.map((name, i) => ({ name, value: risk.counts[i] }))
 
@@ -155,27 +179,101 @@ export default function Overview() {
             count={pendingRectification}
             label="待整改"
             color="bg-amber-50"
+            to="/hazards?status=整改中"
           />
           <TodoCard
             icon={<ClipboardCheck className="h-5 w-5 text-blue-600" />}
             count={pendingInspection}
             label="待巡检"
             color="bg-blue-50"
+            to="/inspections"
           />
           <TodoCard
             icon={<Flame className="h-5 w-5 text-orange-600" />}
             count={pendingDrill}
             label="待演练"
             color="bg-orange-50"
+            to="/drills?status=计划中"
           />
           <TodoCard
             icon={<Shield className="h-5 w-5 text-purple-600" />}
             count={pendingRecheck}
             label="待复查"
             color="bg-purple-50"
+            to="/hazards?status=待复查"
+          />
+          {overdueHazards > 0 && (
+            <TodoCard
+              icon={<AlertTriangle className="h-5 w-5 text-red-600" />}
+              count={overdueHazards}
+              label="已超期"
+              color="bg-red-50"
+              to="/hazards?status=已超期"
+            />
+          )}
+          <TodoCard
+            icon={<AlertTriangle className="h-5 w-5 text-slate-600" />}
+            count={hazards.filter(h => h.status === '待分派').length}
+            label="待分派"
+            color="bg-slate-50"
+            to="/hazards?status=待分派"
           />
         </div>
       </div>
+
+      {(expiringCerts.length > 0 || expiringMaintenance.length > 0) && (
+        <div className="rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <Clock className="h-5 w-5 text-amber-600" />
+            <h3 className="text-sm font-semibold text-amber-800">到期提醒</h3>
+          </div>
+          <div className="space-y-2">
+            {expiringCerts.map((c) => {
+              const facility = facilities.find((f) => f.id === c.facilityId)
+              const building = facility ? buildings.find((b) => b.id === facility.buildingId) : null
+              return (
+                <div key={c.id} className="flex items-center justify-between rounded-lg bg-white/70 px-4 py-2">
+                  <div className="flex items-center gap-3">
+                    <Award className={`h-4 w-4 ${c.status === '已过期' ? 'text-red-500' : 'text-amber-500'}`} />
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">{c.name}</p>
+                      <p className="text-xs text-slate-500">{building?.name ?? '-'} · 到期: {c.expiryDate}</p>
+                    </div>
+                  </div>
+                  <span className={`status-badge ${c.status === '已过期' ? 'status-overdue' : 'status-pending'}`}>
+                    {c.status}
+                  </span>
+                </div>
+              )
+            })}
+            {expiringMaintenance.map((m) => {
+              const facility = facilities.find((f) => f.id === m.facilityId)
+              const building = facility ? buildings.find((b) => b.id === facility.buildingId) : null
+              const isOverdue = new Date(m.nextDate) < new Date()
+              return (
+                <div key={m.id} className="flex items-center justify-between rounded-lg bg-white/70 px-4 py-2">
+                  <div className="flex items-center gap-3">
+                    <Wrench className={`h-4 w-4 ${isOverdue ? 'text-red-500' : 'text-amber-500'}`} />
+                    <div>
+                      <p className="text-sm font-medium text-slate-700">{m.content}</p>
+                      <p className="text-xs text-slate-500">{building?.name ?? '-'} · 下次维保: {m.nextDate}</p>
+                    </div>
+                  </div>
+                  <span className={`status-badge ${isOverdue ? 'status-overdue' : 'status-pending'}`}>
+                    {isOverdue ? '已过期' : '临期'}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          <button
+            onClick={() => navigate('/archives')}
+            className="mt-3 text-xs font-medium text-amber-700 hover:text-amber-800"
+          >
+            查看档案详情 →
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="rounded-xl bg-white p-6 shadow-sm lg:col-span-2">

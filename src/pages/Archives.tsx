@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Building2, Flame, Users, Wrench, Award, Download, Phone, MapPin, Plus, Pencil } from 'lucide-react'
+import { Building2, Flame, Users, Wrench, Award, Download, Phone, MapPin, Plus, Pencil, Clock, AlertTriangle } from 'lucide-react'
 import { useFireStore } from '@/store'
 import type { Building, FireFacility, ResponsiblePerson, MaintenanceRecord, Certificate } from '@/types'
 
@@ -35,10 +35,10 @@ function exportCSV(data: StoreData, month: string) {
     ...facilities.map((f) => [buildings.find((x) => x.id === f.buildingId)?.name ?? '', f.type, f.location, f.quantity, f.status, f.lastCheckDate]),
     [], ['责任人'], ['姓名', '角色', '电话', '负责楼栋'],
     ...persons.map((p) => [p.name, p.role, p.phone, p.buildingIds.map((id) => buildings.find((b) => b.id === id)?.name).filter(Boolean).join(';')]),
-    [], ['维保记录'], ['设施', '楼栋', '日期', '内容', '操作人', '下次维保'],
-    ...maintenanceRecords.map((m) => { const f = facilities.find((x) => x.id === m.facilityId); return [f?.type ?? '', buildings.find((x) => x.id === f?.buildingId)?.name ?? '', m.date, m.content, m.operator, m.nextDate] }),
-    [], ['证书管理'], ['证书名称', '关联设施', '签发日期', '到期日期', '状态'],
-    ...certificates.map((c) => [c.name, facilities.find((x) => x.id === c.facilityId)?.type ?? '', c.issueDate, c.expiryDate, c.status]),
+    [], ['维保记录'], ['设施', '楼栋', '日期', '内容', '操作人', '下次维保', '提醒状态'],
+    ...maintenanceRecords.map((m) => { const f = facilities.find((x) => x.id === m.facilityId); const overdue = new Date(m.nextDate) < new Date(); const nearExpiry = !overdue && (new Date(m.nextDate).getTime() - Date.now()) < 30 * 86400000; const alertStatus = overdue ? '已过期' : nearExpiry ? '临期' : '正常'; return [f?.type ?? '', buildings.find((x) => x.id === f?.buildingId)?.name ?? '', m.date, m.content, m.operator, m.nextDate, alertStatus] }),
+    [], ['证书管理'], ['证书名称', '关联设施', '签发日期', '到期日期', '状态', '提醒状态'],
+    ...certificates.map((c) => [c.name, facilities.find((x) => x.id === c.facilityId)?.type ?? '', c.issueDate, c.expiryDate, c.status, c.status === '已过期' ? '已过期' : c.status === '临期' ? '即将到期' : '正常']),
   ]
   const csv = '\uFEFF' + rows.map((r) => r.map(esc).join(',')).join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -239,6 +239,30 @@ export default function Archives() {
   const getBuilding = (id: string) => buildings.find(b => b.id === id)
   const getFacility = (id: string) => facilities.find(f => f.id === id)
   const filteredFacilities = buildingFilter ? facilities.filter(f => f.buildingId === buildingFilter) : facilities
+
+  const expiryAlerts = useMemo(() => {
+    const alerts: { type: 'cert' | 'maintenance'; label: string; detail: string; status: string }[] = []
+    certificates.forEach(c => {
+      if (c.status === '临期' || c.status === '已过期') {
+        const f = getFacility(c.facilityId)
+        const b = f ? getBuilding(f.buildingId) : null
+        alerts.push({ type: 'cert', label: c.name, detail: `${b?.name ?? '-'} · 到期: ${c.expiryDate}`, status: c.status })
+      }
+    })
+    maintenanceRecords.forEach(m => {
+      const next = new Date(m.nextDate).getTime()
+      const now = Date.now()
+      const overdue = next < now
+      const nearExpiry = !overdue && (next - now) < 30 * 86400000
+      if (overdue || nearExpiry) {
+        const f = getFacility(m.facilityId)
+        const b = f ? getBuilding(f.buildingId) : null
+        alerts.push({ type: 'maintenance', label: m.content, detail: `${b?.name ?? '-'} · 下次维保: ${m.nextDate}`, status: overdue ? '已过期' : '临期' })
+      }
+    })
+    return alerts
+  }, [certificates, maintenanceRecords, facilities, buildings])
+
   const addBtn = (onClick: () => void) => (
     <button onClick={onClick} className="flex items-center gap-1.5 rounded-lg bg-fire-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-fire-700 transition"><Plus size={14} />新增</button>
   )
@@ -266,6 +290,23 @@ export default function Archives() {
           ))}
         </nav>
       </div>
+      {expiryAlerts.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-4">
+          <div className="mb-2 flex items-center gap-2">
+            <Clock className="h-4 w-4 text-amber-600" />
+            <span className="text-sm font-semibold text-amber-800">到期提醒（{expiryAlerts.length}项）</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {expiryAlerts.map((a, i) => (
+              <span key={i} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium ${a.status === '已过期' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                {a.type === 'cert' ? <Award className="h-3 w-3" /> : <Wrench className="h-3 w-3" />}
+                {a.label} - {a.detail}
+                <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[10px] ${a.status === '已过期' ? 'bg-red-200 text-red-800' : 'bg-amber-200 text-amber-800'}`}>{a.status}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
       <AnimatePresence mode="wait">
         <motion.div key={activeTab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
           {activeTab === 'buildings' && (
@@ -340,12 +381,13 @@ export default function Archives() {
               <div className="flex justify-end">{addBtn(() => setMm({ open: true, item: null }))}</div>
               <div className="bg-white rounded-xl shadow-sm overflow-hidden">
                 <table className="w-full text-sm"><thead className="bg-slate-50"><tr>
-                  <th className={thCls}>设施</th><th className={thCls}>楼栋</th><th className={thCls}>日期</th><th className={thCls}>内容</th><th className={thCls}>操作人</th><th className={thCls}>下次维保</th><th className={thCls}>操作</th>
+                  <th className={thCls}>设施</th><th className={thCls}>楼栋</th><th className={thCls}>日期</th><th className={thCls}>内容</th><th className={thCls}>操作人</th><th className={thCls}>下次维保</th><th className={thCls}>提醒</th><th className={thCls}>操作</th>
                 </tr></thead><tbody>
-                  {maintenanceRecords.map(m => { const f = getFacility(m.facilityId); return (
-                    <tr key={m.id} className="border-t border-slate-100">
+                  {maintenanceRecords.map(m => { const f = getFacility(m.facilityId); const overdue = new Date(m.nextDate) < new Date(); const nearExpiry = !overdue && (new Date(m.nextDate).getTime() - Date.now()) < 30 * 86400000; const alertStatus = overdue ? '已过期' : nearExpiry ? '临期' : '正常'; return (
+                    <tr key={m.id} className={`border-t border-slate-100 ${overdue ? 'bg-red-50' : nearExpiry ? 'bg-amber-50' : ''}`}>
                       <td className={tdCls}>{f?.type ?? ''}</td><td className={tdCls}>{f ? getBuilding(f.buildingId)?.name : ''}</td>
                       <td className={tdMuted}>{m.date}</td><td className={tdCls}>{m.content}</td><td className={tdCls}>{m.operator}</td><td className={tdMuted}>{m.nextDate}</td>
+                      <td className="px-4 py-3">{alertStatus !== '正常' ? <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${overdue ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}><AlertTriangle className="h-3 w-3" />{alertStatus}</span> : <span className="text-slate-300">-</span>}</td>
                       <td className="px-4 py-3"><button onClick={() => setMm({ open: true, item: m })} className={ebc}><Pencil size={12} />编辑</button></td>
                     </tr>
                   )})}

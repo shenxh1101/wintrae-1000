@@ -1,4 +1,5 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Plus, Search, AlertTriangle, Camera, Image, X } from 'lucide-react'
 import { useFireStore } from '@/store'
@@ -43,16 +44,11 @@ function PhotoUploader({ photos, onPhotosChange }: { photos: string[]; onPhotosC
     onPhotosChange(newPhotos)
     if (inputRef.current) inputRef.current.value = ''
   }
-  const removePhoto = (idx: number) => {
-    onPhotosChange(photos.filter((_, i) => i !== idx))
-  }
   return (
     <div className="space-y-2">
       <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFiles} />
-      <div
-        onClick={() => inputRef.current?.click()}
-        className="flex cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-slate-200 py-4 text-slate-400 hover:border-fire-300 hover:text-fire-500 transition-colors"
-      >
+      <div onClick={() => inputRef.current?.click()}
+        className="flex cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-slate-200 py-4 text-slate-400 hover:border-fire-300 hover:text-fire-500 transition-colors">
         <Camera className="mr-2 h-5 w-5" />点击选择照片
       </div>
       {photos.length > 0 && (
@@ -60,10 +56,8 @@ function PhotoUploader({ photos, onPhotosChange }: { photos: string[]; onPhotosC
           {photos.map((src, i) => (
             <div key={i} className="relative h-16 w-16">
               <img src={src} alt="" className="h-16 w-16 rounded-lg object-cover border border-slate-200" />
-              <button
-                onClick={() => removePhoto(i)}
-                className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white"
-              >
+              <button onClick={() => onPhotosChange(photos.filter((_, j) => j !== i))}
+                className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white">
                 <X className="h-2.5 w-2.5" />
               </button>
             </div>
@@ -161,9 +155,8 @@ function RecheckModal({ open, onClose, hazard }: { open: boolean; onClose: () =>
   const [photos, setPhotos] = useState<string[]>([])
   const submit = () => {
     if (!hazard) return
-    const newStatus = form.result === '通过' ? '已关闭' : '整改中'
     updateHazard(hazard.id, {
-      status: newStatus,
+      status: form.result === '通过' ? '已关闭' : '整改中',
       rechecks: [...hazard.rechecks, { id: `r${Date.now()}`, hazardId: hazard.id, result: form.result, opinion: form.opinion, photos, createdAt: new Date().toISOString().slice(0, 10) }],
     })
     setForm({ result: '通过', opinion: '' })
@@ -175,8 +168,7 @@ function RecheckModal({ open, onClose, hazard }: { open: boolean; onClose: () =>
       <div className="space-y-3">
         <select className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" value={form.result}
           onChange={e => setForm(f => ({ ...f, result: e.target.value as '通过' | '不通过' }))}>
-          <option value="通过">通过</option>
-          <option value="不通过">不通过</option>
+          <option value="通过">通过</option><option value="不通过">不通过</option>
         </select>
         <textarea className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" rows={3} placeholder="复查意见"
           value={form.opinion} onChange={e => setForm(f => ({ ...f, opinion: e.target.value }))} />
@@ -187,11 +179,35 @@ function RecheckModal({ open, onClose, hazard }: { open: boolean; onClose: () =>
   )
 }
 
-function HazardDetailModal({ open, onClose, hazard }: { open: boolean; onClose: () => void; hazard: Hazard | null }) {
-  const { buildings } = useFireStore()
+function RectifyModal({ open, onClose, hazard }: { open: boolean; onClose: () => void; hazard: Hazard | null }) {
+  const { updateHazard } = useFireStore()
+  const [rectPhotos, setRectPhotos] = useState<string[]>([])
+  const submit = () => {
+    if (!hazard) return
+    updateHazard(hazard.id, {
+      status: '待复查',
+      rectification: { ...hazard.rectification!, completedAt: new Date().toISOString().slice(0, 10), photos: rectPhotos },
+    })
+    setRectPhotos([])
+    onClose()
+  }
+  return (
+    <Modal open={open} onClose={onClose} title="提交整改">
+      <div className="space-y-3">
+        <textarea className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" rows={3} placeholder="整改结果" />
+        <PhotoUploader photos={rectPhotos} onPhotosChange={setRectPhotos} />
+        <button onClick={submit} className="w-full rounded-lg bg-fire-600 py-2 text-sm font-medium text-white hover:bg-fire-700">提交</button>
+      </div>
+    </Modal>
+  )
+}
+
+function HazardDetailModal({ open, onClose, hazard, onRectify }: { open: boolean; onClose: () => void; hazard: Hazard | null; onRectify: (h: Hazard) => void }) {
+  const { buildings, persons } = useFireStore()
   if (!hazard) return null
   const buildingName = buildings.find(b => b.id === hazard.buildingId)?.name ?? '-'
-  const allPhotos = [...hazard.photos, ...hazard.rechecks.flatMap(r => r.photos)]
+  const rect = hazard.rectification
+  const assigneeName = rect ? (persons.find(p => p.id === rect.assigneeId)?.name ?? '-') : '-'
   return (
     <Modal open={open} onClose={onClose} title="隐患详情">
       <div className="space-y-3 text-sm">
@@ -201,15 +217,40 @@ function HazardDetailModal({ open, onClose, hazard }: { open: boolean; onClose: 
         <div className="flex justify-between"><span className="text-slate-500">等级</span><span className={`status-badge ${levelClass[hazard.level]}`}>{hazard.level}</span></div>
         <div className="flex justify-between"><span className="text-slate-500">状态</span><span className={`status-badge ${statusClass[hazard.status]}`}>{hazard.status}</span></div>
         <div className="flex justify-between"><span className="text-slate-500">截止日期</span><span className="font-medium">{hazard.deadline || '-'}</span></div>
-        {allPhotos.length > 0 && (
-          <div>
-            <span className="text-slate-500">照片（{allPhotos.length}张）</span>
-            <div className="mt-1 flex flex-wrap gap-2">
-              {allPhotos.map((src, i) => (
-                <img key={i} src={src} alt="" className="h-16 w-16 rounded-lg object-cover border border-slate-200" />
-              ))}
-            </div>
+        {hazard.photos.length > 0 && (
+          <div><span className="text-slate-500">隐患照片（{hazard.photos.length}张）</span>
+            <div className="mt-1 flex flex-wrap gap-2">{hazard.photos.map((src, i) => <img key={i} src={src} alt="" className="h-16 w-16 rounded-lg object-cover border border-slate-200" />)}</div>
           </div>
+        )}
+        {rect && (
+          <div className="border-t border-slate-100 pt-3">
+            <p className="mb-2 font-medium text-slate-700">整改信息</p>
+            {rect.requirement && <div className="flex justify-between"><span className="text-slate-500">整改要求</span><span className="font-medium">{rect.requirement}</span></div>}
+            <div className="flex justify-between"><span className="text-slate-500">责任人</span><span className="font-medium">{assigneeName}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">截止日期</span><span className="font-medium">{rect.deadline || '-'}</span></div>
+            {rect.completedAt && <div className="flex justify-between"><span className="text-slate-500">完成日期</span><span className="font-medium">{rect.completedAt}</span></div>}
+            {rect.photos.length > 0 && (
+              <div className="mt-2"><span className="text-slate-500">整改照片（{rect.photos.length}张）</span>
+                <div className="mt-1 flex flex-wrap gap-2">{rect.photos.map((src, i) => <img key={i} src={src} alt="" className="h-16 w-16 rounded-lg object-cover border border-slate-200" />)}</div>
+              </div>
+            )}
+          </div>
+        )}
+        {hazard.rechecks.length > 0 && (
+          <div className="border-t border-slate-100 pt-3">
+            <p className="mb-2 font-medium text-slate-700">复查记录</p>
+            {hazard.rechecks.map((r, idx) => (
+              <div key={r.id} className={idx > 0 ? 'mt-2 border-t border-slate-50 pt-2' : ''}>
+                <div className="flex justify-between"><span className="text-slate-500">复查{idx + 1}</span><span className={`status-badge ${r.result === '通过' ? 'status-closed' : 'status-progress'}`}>{r.result}</span></div>
+                {r.opinion && <div className="flex justify-between"><span className="text-slate-500">意见</span><span className="font-medium">{r.opinion}</span></div>}
+                <div className="flex justify-between"><span className="text-slate-500">日期</span><span className="font-medium">{r.createdAt}</span></div>
+                {r.photos.length > 0 && <div className="mt-1 flex flex-wrap gap-2">{r.photos.map((src, i) => <img key={i} src={src} alt="" className="h-16 w-16 rounded-lg object-cover border border-slate-200" />)}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+        {hazard.status === '整改中' && (
+          <button onClick={() => { onRectify(hazard); onClose() }} className="w-full rounded-lg bg-fire-600 py-2 text-sm font-medium text-white hover:bg-fire-700">提交整改</button>
         )}
       </div>
     </Modal>
@@ -218,6 +259,7 @@ function HazardDetailModal({ open, onClose, hazard }: { open: boolean; onClose: 
 
 export default function Hazards() {
   const { hazards, buildings, persons } = useFireStore()
+  const [searchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('全部')
   const [levelFilter, setLevelFilter] = useState<string>('全部')
@@ -225,15 +267,16 @@ export default function Hazards() {
   const [regOpen, setRegOpen] = useState(false)
   const [assignTarget, setAssignTarget] = useState<Hazard | null>(null)
   const [recheckTarget, setRecheckTarget] = useState<Hazard | null>(null)
+  const [rectifyTarget, setRectifyTarget] = useState<Hazard | null>(null)
   const [detailTarget, setDetailTarget] = useState<Hazard | null>(null)
 
+  useEffect(() => {
+    const s = searchParams.get('status')
+    if (s && (statusList as readonly string[]).includes(s)) setStatusFilter(s)
+  }, [searchParams])
+
   const buildingMap = useMemo(() => Object.fromEntries(buildings.map(b => [b.id, b.name])), [buildings])
-
-  const urgentCount = useMemo(() => hazards.filter(h => {
-    const { urgent, overdue } = deadlineInfo(h.deadline)
-    return urgent || overdue
-  }).length, [hazards])
-
+  const urgentCount = useMemo(() => hazards.filter(h => { const { urgent, overdue } = deadlineInfo(h.deadline); return urgent || overdue }).length, [hazards])
   const overdueCount = useMemo(() => hazards.filter(h => deadlineInfo(h.deadline).overdue).length, [hazards])
 
   const filtered = useMemo(() => hazards.filter(h => {
@@ -247,7 +290,7 @@ export default function Hazards() {
   const actionBtn = (h: Hazard) => {
     switch (h.status) {
       case '待分派': return <button onClick={() => setAssignTarget(h)} className="rounded-md bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100">分派</button>
-      case '整改中': return <button onClick={() => setDetailTarget(h)} className="rounded-md bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100">查看</button>
+      case '整改中': return <button onClick={() => setRectifyTarget(h)} className="rounded-md bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100">提交整改</button>
       case '待复查': return <button onClick={() => setRecheckTarget(h)} className="rounded-md bg-purple-50 px-3 py-1 text-xs font-medium text-purple-700 hover:bg-purple-100">复查</button>
       case '已关闭': return <button onClick={() => setDetailTarget(h)} className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">查看</button>
       case '已超期': return <button onClick={() => setAssignTarget(h)} className="rounded-md bg-red-50 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100">催办</button>
@@ -260,59 +303,43 @@ export default function Hazards() {
         <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
           className={`flex items-center gap-3 rounded-xl px-5 py-3 ${overdueCount > 0 ? 'bg-gradient-to-r from-red-500 to-red-400 text-white' : 'bg-gradient-to-r from-amber-400 to-amber-300 text-amber-900'}`}>
           <AlertTriangle className="h-5 w-5" />
-          <span className="text-sm font-medium">
-            {overdueCount > 0 ? `${overdueCount}项隐患已超期，请立即处理！` : `${urgentCount}项隐患即将到期（3天内），请关注！`}
-          </span>
+          <span className="text-sm font-medium">{overdueCount > 0 ? `${overdueCount}项隐患已超期，请立即处理！` : `${urgentCount}项隐患即将到期（3天内），请关注！`}</span>
         </motion.div>
       )}
-
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-800">隐患管理</h2>
-        <button onClick={() => setRegOpen(true)}
-          className="flex items-center gap-2 rounded-lg bg-fire-600 px-4 py-2 text-sm font-medium text-white hover:bg-fire-700">
+        <button onClick={() => setRegOpen(true)} className="flex items-center gap-2 rounded-lg bg-fire-600 px-4 py-2 text-sm font-medium text-white hover:bg-fire-700">
           <Plus className="h-4 w-4" />登记隐患
         </button>
       </div>
-
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm" placeholder="搜索隐患..."
-            value={search} onChange={e => setSearch(e.target.value)} />
+          <input className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm" placeholder="搜索隐患..." value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <select className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}>
+        <select className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           {statusList.map(s => <option key={s}>{s}</option>)}
         </select>
-        <select className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={levelFilter}
-          onChange={e => setLevelFilter(e.target.value)}>
+        <select className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={levelFilter} onChange={e => setLevelFilter(e.target.value)}>
           {levelList.map(l => <option key={l}>{l}</option>)}
         </select>
-        <select className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={buildingFilter}
-          onChange={e => setBuildingFilter(e.target.value)}>
-          <option>全部</option>
-          {buildings.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        <select className="rounded-lg border border-slate-200 px-3 py-2 text-sm" value={buildingFilter} onChange={e => setBuildingFilter(e.target.value)}>
+          <option>全部</option>{buildings.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
       </div>
-
       <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-medium uppercase tracking-wider text-slate-500">
-              <th className="px-4 py-3">楼栋</th>
-              <th className="px-4 py-3">位置</th>
-              <th className="px-4 py-3">描述</th>
-              <th className="px-4 py-3">等级</th>
-              <th className="px-4 py-3">状态</th>
-              <th className="px-4 py-3">照片</th>
-              <th className="px-4 py-3">截止日期</th>
-              <th className="px-4 py-3">操作</th>
+              <th className="px-4 py-3">楼栋</th><th className="px-4 py-3">位置</th><th className="px-4 py-3">描述</th>
+              <th className="px-4 py-3">等级</th><th className="px-4 py-3">状态</th><th className="px-4 py-3">照片</th>
+              <th className="px-4 py-3">截止日期</th><th className="px-4 py-3">操作</th>
             </tr>
           </thead>
           <tbody>
             {filtered.map(h => {
               const { urgent, overdue } = deadlineInfo(h.deadline)
-              const photoCount = h.photos.length + h.rechecks.flatMap(r => r.photos).length
+              const photoCount = h.photos.length + (h.rectification?.photos.length ?? 0) + h.rechecks.flatMap(r => r.photos).length
               return (
                 <tr key={h.id} className="border-b border-slate-50 transition-colors hover:bg-slate-50">
                   <td className="px-4 py-3 font-medium text-slate-700">{buildingMap[h.buildingId] || '-'}</td>
@@ -321,32 +348,22 @@ export default function Hazards() {
                   <td className="px-4 py-3"><span className={`status-badge ${levelClass[h.level]}`}>{h.level}</span></td>
                   <td className="px-4 py-3"><span className={`status-badge ${statusClass[h.status]}`}>{h.status}</span></td>
                   <td className="px-4 py-3">
-                    {photoCount > 0 ? (
-                      <span className="flex items-center gap-1 text-fire-600">
-                        <Image className="h-3.5 w-3.5" />{photoCount}
-                      </span>
-                    ) : (
-                      <span className="text-slate-300">-</span>
-                    )}
+                    {photoCount > 0 ? <span className="flex items-center gap-1 text-fire-600"><Image className="h-3.5 w-3.5" />{photoCount}</span> : <span className="text-slate-300">-</span>}
                   </td>
-                  <td className={`px-4 py-3 ${overdue ? 'text-red-600 font-medium' : urgent ? 'text-amber-600 font-medium' : 'text-slate-600'}`}>
-                    {h.deadline || '-'}
-                  </td>
+                  <td className={`px-4 py-3 ${overdue ? 'text-red-600 font-medium' : urgent ? 'text-amber-600 font-medium' : 'text-slate-600'}`}>{h.deadline || '-'}</td>
                   <td className="px-4 py-3">{actionBtn(h)}</td>
                 </tr>
               )
             })}
-            {filtered.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-400">暂无隐患记录</td></tr>
-            )}
+            {filtered.length === 0 && <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-400">暂无隐患记录</td></tr>}
           </tbody>
         </table>
       </div>
-
       <RegisterModal open={regOpen} onClose={() => setRegOpen(false)} />
       <AssignModal open={!!assignTarget} onClose={() => setAssignTarget(null)} hazard={assignTarget} />
       <RecheckModal open={!!recheckTarget} onClose={() => setRecheckTarget(null)} hazard={recheckTarget} />
-      <HazardDetailModal open={!!detailTarget} onClose={() => setDetailTarget(null)} hazard={detailTarget} />
+      <RectifyModal open={!!rectifyTarget} onClose={() => setRectifyTarget(null)} hazard={rectifyTarget} />
+      <HazardDetailModal open={!!detailTarget} onClose={() => setDetailTarget(null)} hazard={detailTarget} onRectify={h => { setDetailTarget(null); setRectifyTarget(h) }} />
     </motion.div>
   )
 }

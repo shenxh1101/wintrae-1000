@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { PieChart, Pie, Cell } from 'recharts'
 import {
   Plus, Calendar, Users, Star, AlertTriangle,
   CheckCircle, Clock, ChevronRight, Flame, ArrowRight, UserCheck,
-  Play, Flag,
+  Play, Flag, FileText, User,
 } from 'lucide-react'
 import { useFireStore } from '@/store'
 import type { Drill, DrillScore } from '@/types'
@@ -35,14 +36,22 @@ const steps: Drill['status'][] = ['计划中', '进行中', '已完成']
 
 export default function Drills() {
   const { drills, buildings, persons, addDrill, updateDrill, toggleDrillCheckIn, updateDrillScore, addDrillIssue } = useFireStore()
+  const [searchParams] = useSearchParams()
   const [selectedDrillId, setSelectedDrillId] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [activeTab, setActiveTab] = useState<typeof tabs[number]>('签到')
   const [newIssue, setNewIssue] = useState('')
-
   const [formType, setFormType] = useState<Drill['type']>('灭火演练')
   const [formBuildingId, setFormBuildingId] = useState(buildings[0]?.id ?? '')
   const [formDate, setFormDate] = useState('')
+
+  useEffect(() => {
+    const statusParam = searchParams.get('status') as Drill['status'] | null
+    if (statusParam && !selectedDrillId) {
+      const match = drills.find((d) => d.status === statusParam)
+      if (match) setSelectedDrillId(match.id)
+    }
+  }, [searchParams, drills])
 
   const selectedDrill = drills.find((d) => d.id === selectedDrillId) ?? null
   const buildingName = (id: string) => buildings.find((b) => b.id === id)?.name ?? '未知'
@@ -66,17 +75,15 @@ export default function Drills() {
 
   const checkedIn = selectedDrill?.participants.filter((p) => p.checkedIn).length ?? 0
   const total = selectedDrill?.participants.length ?? 1
-  const pieData = [
-    { value: checkedIn },
-    { value: total - checkedIn },
-  ]
+  const pieData = [{ value: checkedIn }, { value: total - checkedIn }]
   const totalScore = selectedDrill?.scores.reduce((s, sc) => s + sc.actualScore, 0) ?? 0
   const maxTotal = selectedDrill?.scores.reduce((s, sc) => s + sc.maxScore, 0) ?? 100
   const scorePct = Math.round((totalScore / maxTotal) * 100)
   const participationRate = total > 0 ? Math.round((checkedIn / total) * 100) : 0
-
   const currentStepIndex = selectedDrill ? steps.indexOf(selectedDrill.status) : 0
   const canComplete = checkedIn >= 1
+
+  const firstCheckedIn = selectedDrill?.participants.find((p) => p.checkedIn)
 
   return (
     <div className="space-y-6">
@@ -93,6 +100,12 @@ export default function Drills() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {drills.map((drill) => {
           const Icon = statusIcon[drill.status]
+          const dCheckedIn = drill.participants.filter((p) => p.checkedIn).length
+          const dTotal = drill.participants.length || 1
+          const dScoreTotal = drill.scores.reduce((s, sc) => s + sc.actualScore, 0)
+          const dMaxTotal = drill.scores.reduce((s, sc) => s + sc.maxScore, 0) || 100
+          const dScorePct = Math.round((dScoreTotal / dMaxTotal) * 100)
+          const dPartRate = Math.round((dCheckedIn / dTotal) * 100)
           return (
             <motion.div
               key={drill.id}
@@ -120,6 +133,19 @@ export default function Drills() {
                 <span className="flex items-center gap-1"><Users className="h-3.5 w-3.5" />{drill.participants.length} 人</span>
                 <ChevronRight className="h-4 w-4" />
               </div>
+              {drill.status === '已完成' && (
+                <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-fire-50 px-2.5 py-0.5 text-xs font-medium text-fire-700">
+                    <Star className="h-3 w-3" />评分: {dScorePct}%
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+                    <AlertTriangle className="h-3 w-3" />问题: {drill.issues.length}项
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                    <UserCheck className="h-3 w-3" />参与: {dPartRate}%
+                  </span>
+                </div>
+              )}
             </motion.div>
           )
         })}
@@ -166,9 +192,7 @@ export default function Drills() {
                       </div>
                       {i < steps.length - 1 && (
                         <motion.div
-                          animate={{
-                            backgroundColor: i < currentStepIndex ? '#059669' : '#E2E8F0',
-                          }}
+                          animate={{ backgroundColor: i < currentStepIndex ? '#059669' : '#E2E8F0' }}
                           className="w-16 h-0.5 mx-2 mb-4"
                         />
                       )}
@@ -340,21 +364,82 @@ export default function Drills() {
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="border-t p-5 bg-slate-50 rounded-b-xl"
+                  className="border-t bg-slate-50 rounded-b-xl"
                 >
-                  <h3 className="text-sm font-semibold text-slate-700 mb-3">演练总结</h3>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="text-center">
-                      <p className="text-2xl font-bold text-fire-600">{scorePct}%</p>
-                      <p className="text-xs text-slate-400">总评分</p>
+                  <div className="p-5">
+                    <div className="flex items-center gap-2 mb-4">
+                      <FileText className="h-5 w-5 text-fire-600" />
+                      <h3 className="text-base font-bold text-slate-800">演练总结报告</h3>
                     </div>
-                    <div className="text-center">
-                      <p className="text-2xl font-bold text-amber-600">{selectedDrill.issues.length}</p>
-                      <p className="text-xs text-slate-400">问题数</p>
+
+                    <div className="bg-white rounded-lg border border-slate-200 p-4 mb-4">
+                      <h4 className="text-sm font-semibold text-slate-700 mb-3">评分明细</h4>
+                      <div className="space-y-3">
+                        {selectedDrill.scores.map((s, i) => {
+                          const pct = Math.round((s.actualScore / s.maxScore) * 100)
+                          return (
+                            <div key={i}>
+                              <div className="flex items-center justify-between text-sm mb-1">
+                                <span className="text-slate-600">{s.item}</span>
+                                <span className="font-medium text-slate-800">{s.actualScore}/{s.maxScore}</span>
+                              </div>
+                              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                <motion.div
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${pct}%` }}
+                                  transition={{ duration: 0.6, delay: i * 0.1 }}
+                                  className={`h-full rounded-full ${pct >= 80 ? 'bg-emerald-500' : pct >= 60 ? 'bg-amber-500' : 'bg-red-500'}`}
+                                />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-100">
+                        <span className="text-sm font-semibold text-slate-700">总分</span>
+                        <span className="text-lg font-bold text-fire-600">{totalScore}/{maxTotal} ({scorePct}%)</span>
+                      </div>
                     </div>
-                    <div className="text-center">
-                      <p className="text-2xl font-bold text-emerald-600">{participationRate}%</p>
-                      <p className="text-xs text-slate-400">参与率 ({checkedIn}/{total})</p>
+
+                    <div className="bg-white rounded-lg border border-slate-200 p-4 mb-4">
+                      <h4 className="text-sm font-semibold text-slate-700 mb-2">参与情况</h4>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-600">签到人数</span>
+                        <span className="text-sm font-medium text-slate-800">{checkedIn}/{total} ({participationRate}%)</span>
+                      </div>
+                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden mt-2">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${participationRate}%` }}
+                          transition={{ duration: 0.6 }}
+                          className="h-full rounded-full bg-emerald-500"
+                        />
+                      </div>
+                    </div>
+
+                    {selectedDrill.issues.length > 0 && (
+                      <div className="bg-white rounded-lg border border-slate-200 p-4 mb-4">
+                        <h4 className="text-sm font-semibold text-slate-700 mb-3">问题清单</h4>
+                        <div className="space-y-2">
+                          {selectedDrill.issues.map((issue, i) => (
+                            <div key={i} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                              <div className="flex items-start gap-2">
+                                <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                                <span className="text-sm text-slate-700">{issue}</span>
+                              </div>
+                              <p className="text-xs text-slate-500 mt-1.5 pl-6">建议：及时整改并复检</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="bg-white rounded-lg border border-slate-200 p-4">
+                      <h4 className="text-sm font-semibold text-slate-700 mb-2">现场负责人</h4>
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-fire-500" />
+                        <span className="text-sm text-slate-700">{buildingName(selectedDrill.buildingId)} — {firstCheckedIn?.name ?? '无'}</span>
+                      </div>
                     </div>
                   </div>
                 </motion.div>
