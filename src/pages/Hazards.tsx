@@ -1,9 +1,11 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Search, AlertTriangle, Camera, Image, X } from 'lucide-react'
+import { Plus, Search, AlertTriangle, Camera, Image, X, FileText, UserPlus, Wrench, CheckCircle, XCircle } from 'lucide-react'
 import { useFireStore } from '@/store'
-import type { Hazard } from '@/types'
+import type { Hazard, HazardEvent } from '@/types'
+
+const CURRENT_USER = 'p4'
 
 const statusClass: Record<Hazard['status'], string> = {
   '待分派': 'status-pending', '整改中': 'status-progress', '待复查': 'status-recheck',
@@ -14,6 +16,14 @@ const levelClass: Record<Hazard['level'], string> = {
 }
 const statusList = ['全部', '待分派', '整改中', '待复查', '已关闭', '已超期'] as const
 const levelList = ['全部', '一般', '较大', '重大', '特别重大'] as const
+
+const eventCfg: Record<HazardEvent['type'], { Icon: typeof FileText; dot: string; color: string; bg: string }> = {
+  '登记': { Icon: FileText, dot: 'bg-blue-500', color: 'text-blue-500', bg: 'bg-blue-50 text-blue-600' },
+  '分派': { Icon: UserPlus, dot: 'bg-amber-500', color: 'text-amber-500', bg: 'bg-amber-50 text-amber-600' },
+  '提交整改': { Icon: Wrench, dot: 'bg-green-500', color: 'text-green-500', bg: 'bg-green-50 text-green-600' },
+  '复查通过': { Icon: CheckCircle, dot: 'bg-emerald-500', color: 'text-emerald-500', bg: 'bg-emerald-50 text-emerald-600' },
+  '复查不通过': { Icon: XCircle, dot: 'bg-red-500', color: 'text-red-500', bg: 'bg-red-50 text-red-600' },
+}
 
 function deadlineInfo(deadline: string) {
   if (!deadline) return { urgent: false, overdue: false }
@@ -91,7 +101,11 @@ function RegisterModal({ open, onClose }: { open: boolean; onClose: () => void }
   const [photos, setPhotos] = useState<string[]>([])
   const submit = () => {
     if (!form.buildingId || !form.location || !form.description) return
-    addHazard({ id: `h${Date.now()}`, ...form, status: '待分派', photos, createdAt: new Date().toISOString().slice(0, 10), deadline: '', assigneeId: '', rechecks: [] })
+    const now = new Date().toISOString().slice(0, 10)
+    addHazard({
+      id: `h${Date.now()}`, ...form, status: '待分派', photos, createdAt: now, deadline: '', assigneeId: '', rechecks: [],
+      events: [{ type: '登记', time: now, description: form.description, photos, operatorId: CURRENT_USER }],
+    })
     setForm({ buildingId: '', location: '', description: '', level: '一般' })
     setPhotos([])
     onClose()
@@ -124,9 +138,11 @@ function AssignModal({ open, onClose, hazard }: { open: boolean; onClose: () => 
   const [form, setForm] = useState({ assigneeId: '', deadline: '', requirement: '' })
   const submit = () => {
     if (!hazard || !form.assigneeId || !form.deadline) return
+    const now = new Date().toISOString().slice(0, 10)
     updateHazard(hazard.id, {
       status: '整改中', assigneeId: form.assigneeId, deadline: form.deadline,
       rectification: { assigneeId: form.assigneeId, deadline: form.deadline, requirement: form.requirement, photos: [] },
+      events: [...(hazard.events ?? []), { type: '分派' as const, time: now, description: form.requirement, photos: [] as string[], operatorId: form.assigneeId, deadline: form.deadline }],
     })
     setForm({ assigneeId: '', deadline: '', requirement: '' })
     onClose()
@@ -155,9 +171,12 @@ function RecheckModal({ open, onClose, hazard }: { open: boolean; onClose: () =>
   const [photos, setPhotos] = useState<string[]>([])
   const submit = () => {
     if (!hazard) return
+    const now = new Date().toISOString().slice(0, 10)
+    const eventType = form.result === '通过' ? '复查通过' as const : '复查不通过' as const
     updateHazard(hazard.id, {
       status: form.result === '通过' ? '已关闭' : '整改中',
-      rechecks: [...hazard.rechecks, { id: `r${Date.now()}`, hazardId: hazard.id, result: form.result, opinion: form.opinion, photos, createdAt: new Date().toISOString().slice(0, 10) }],
+      rechecks: [...hazard.rechecks, { id: `r${Date.now()}`, hazardId: hazard.id, result: form.result, opinion: form.opinion, photos, createdAt: now }],
+      events: [...(hazard.events ?? []), { type: eventType, time: now, description: form.opinion, photos, operatorId: CURRENT_USER }],
     })
     setForm({ result: '通过', opinion: '' })
     setPhotos([])
@@ -181,20 +200,25 @@ function RecheckModal({ open, onClose, hazard }: { open: boolean; onClose: () =>
 
 function RectifyModal({ open, onClose, hazard }: { open: boolean; onClose: () => void; hazard: Hazard | null }) {
   const { updateHazard } = useFireStore()
+  const [result, setResult] = useState('')
   const [rectPhotos, setRectPhotos] = useState<string[]>([])
   const submit = () => {
     if (!hazard) return
+    const now = new Date().toISOString().slice(0, 10)
     updateHazard(hazard.id, {
       status: '待复查',
-      rectification: { ...hazard.rectification!, completedAt: new Date().toISOString().slice(0, 10), photos: rectPhotos },
+      rectification: { ...hazard.rectification!, result, completedAt: now, photos: rectPhotos },
+      events: [...(hazard.events ?? []), { type: '提交整改' as const, time: now, description: result, photos: rectPhotos, operatorId: hazard.assigneeId }],
     })
+    setResult('')
     setRectPhotos([])
     onClose()
   }
   return (
     <Modal open={open} onClose={onClose} title="提交整改">
       <div className="space-y-3">
-        <textarea className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" rows={3} placeholder="整改结果" />
+        <textarea className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" rows={3} placeholder="整改结果"
+          value={result} onChange={e => setResult(e.target.value)} />
         <PhotoUploader photos={rectPhotos} onPhotosChange={setRectPhotos} />
         <button onClick={submit} className="w-full rounded-lg bg-fire-600 py-2 text-sm font-medium text-white hover:bg-fire-700">提交</button>
       </div>
@@ -206,47 +230,46 @@ function HazardDetailModal({ open, onClose, hazard, onRectify }: { open: boolean
   const { buildings, persons } = useFireStore()
   if (!hazard) return null
   const buildingName = buildings.find(b => b.id === hazard.buildingId)?.name ?? '-'
-  const rect = hazard.rectification
-  const assigneeName = rect ? (persons.find(p => p.id === rect.assigneeId)?.name ?? '-') : '-'
+  const events = hazard.events ?? []
   return (
     <Modal open={open} onClose={onClose} title="隐患详情">
-      <div className="space-y-3 text-sm">
-        <div className="flex justify-between"><span className="text-slate-500">楼栋</span><span className="font-medium">{buildingName}</span></div>
-        <div className="flex justify-between"><span className="text-slate-500">位置</span><span className="font-medium">{hazard.location}</span></div>
-        <div><span className="text-slate-500">描述</span><p className="mt-1 text-slate-700">{hazard.description}</p></div>
-        <div className="flex justify-between"><span className="text-slate-500">等级</span><span className={`status-badge ${levelClass[hazard.level]}`}>{hazard.level}</span></div>
-        <div className="flex justify-between"><span className="text-slate-500">状态</span><span className={`status-badge ${statusClass[hazard.status]}`}>{hazard.status}</span></div>
-        <div className="flex justify-between"><span className="text-slate-500">截止日期</span><span className="font-medium">{hazard.deadline || '-'}</span></div>
-        {hazard.photos.length > 0 && (
-          <div><span className="text-slate-500">隐患照片（{hazard.photos.length}张）</span>
-            <div className="mt-1 flex flex-wrap gap-2">{hazard.photos.map((src, i) => <img key={i} src={src} alt="" className="h-16 w-16 rounded-lg object-cover border border-slate-200" />)}</div>
-          </div>
-        )}
-        {rect && (
-          <div className="border-t border-slate-100 pt-3">
-            <p className="mb-2 font-medium text-slate-700">整改信息</p>
-            {rect.requirement && <div className="flex justify-between"><span className="text-slate-500">整改要求</span><span className="font-medium">{rect.requirement}</span></div>}
-            <div className="flex justify-between"><span className="text-slate-500">责任人</span><span className="font-medium">{assigneeName}</span></div>
-            <div className="flex justify-between"><span className="text-slate-500">截止日期</span><span className="font-medium">{rect.deadline || '-'}</span></div>
-            {rect.completedAt && <div className="flex justify-between"><span className="text-slate-500">完成日期</span><span className="font-medium">{rect.completedAt}</span></div>}
-            {rect.photos.length > 0 && (
-              <div className="mt-2"><span className="text-slate-500">整改照片（{rect.photos.length}张）</span>
-                <div className="mt-1 flex flex-wrap gap-2">{rect.photos.map((src, i) => <img key={i} src={src} alt="" className="h-16 w-16 rounded-lg object-cover border border-slate-200" />)}</div>
-              </div>
-            )}
-          </div>
-        )}
-        {hazard.rechecks.length > 0 && (
-          <div className="border-t border-slate-100 pt-3">
-            <p className="mb-2 font-medium text-slate-700">复查记录</p>
-            {hazard.rechecks.map((r, idx) => (
-              <div key={r.id} className={idx > 0 ? 'mt-2 border-t border-slate-50 pt-2' : ''}>
-                <div className="flex justify-between"><span className="text-slate-500">复查{idx + 1}</span><span className={`status-badge ${r.result === '通过' ? 'status-closed' : 'status-progress'}`}>{r.result}</span></div>
-                {r.opinion && <div className="flex justify-between"><span className="text-slate-500">意见</span><span className="font-medium">{r.opinion}</span></div>}
-                <div className="flex justify-between"><span className="text-slate-500">日期</span><span className="font-medium">{r.createdAt}</span></div>
-                {r.photos.length > 0 && <div className="mt-1 flex flex-wrap gap-2">{r.photos.map((src, i) => <img key={i} src={src} alt="" className="h-16 w-16 rounded-lg object-cover border border-slate-200" />)}</div>}
-              </div>
-            ))}
+      <div className="space-y-4 text-sm">
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          <div><span className="text-slate-400">楼栋</span> <span className="font-medium text-slate-700">{buildingName}</span></div>
+          <div><span className="text-slate-400">位置</span> <span className="font-medium text-slate-700">{hazard.location}</span></div>
+          <div><span className={`status-badge ${levelClass[hazard.level]}`}>{hazard.level}</span></div>
+          <div><span className={`status-badge ${statusClass[hazard.status]}`}>{hazard.status}</span></div>
+        </div>
+        {events.length > 0 && (
+          <div>
+            {events.map((ev, idx) => {
+              const cfg = eventCfg[ev.type]
+              const isLast = idx === events.length - 1
+              const operatorName = persons.find(p => p.id === ev.operatorId)?.name ?? '-'
+              return (
+                <div key={idx} className="flex gap-3">
+                  <div className="flex flex-col items-center">
+                    <div className={`h-3 w-3 rounded-full ${cfg.dot} mt-1.5 shrink-0`} />
+                    {!isLast && <div className="w-0.5 flex-1 bg-slate-200" />}
+                  </div>
+                  <div className={isLast ? 'pb-0' : 'pb-5'}>
+                    <div className="flex items-center gap-2">
+                      <cfg.Icon className={`h-4 w-4 ${cfg.color}`} />
+                      <span className={`rounded-md px-1.5 py-0.5 text-xs font-medium ${cfg.bg}`}>{ev.type}</span>
+                      <span className="text-xs text-slate-400">{ev.time}</span>
+                    </div>
+                    {ev.description && <p className="mt-1 text-slate-600">{ev.description}</p>}
+                    <p className="text-xs text-slate-400 mt-0.5">操作人: {operatorName}</p>
+                    {ev.deadline && <p className="text-xs text-amber-600 mt-0.5">截止: {ev.deadline}</p>}
+                    {ev.photos.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {ev.photos.map((src, i) => <img key={i} src={src} alt="" className="h-12 w-12 rounded object-cover border border-slate-200" />)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
         {hazard.status === '整改中' && (

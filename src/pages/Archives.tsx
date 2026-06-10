@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Building2, Flame, Users, Wrench, Award, Download, Phone, MapPin, Plus, Pencil, Clock, AlertTriangle } from 'lucide-react'
 import { useFireStore } from '@/store'
 import type { Building, FireFacility, ResponsiblePerson, MaintenanceRecord, Certificate } from '@/types'
+import { calcCertStatus, calcMaintenanceStatus } from '@/types'
 
 const tabs = [
   { key: 'buildings', label: '建筑档案', icon: Building2 },
@@ -38,7 +40,7 @@ function exportCSV(data: StoreData, month: string) {
     [], ['维保记录'], ['设施', '楼栋', '日期', '内容', '操作人', '下次维保', '提醒状态'],
     ...maintenanceRecords.map((m) => { const f = facilities.find((x) => x.id === m.facilityId); const overdue = new Date(m.nextDate) < new Date(); const nearExpiry = !overdue && (new Date(m.nextDate).getTime() - Date.now()) < 30 * 86400000; const alertStatus = overdue ? '已过期' : nearExpiry ? '临期' : '正常'; return [f?.type ?? '', buildings.find((x) => x.id === f?.buildingId)?.name ?? '', m.date, m.content, m.operator, m.nextDate, alertStatus] }),
     [], ['证书管理'], ['证书名称', '关联设施', '签发日期', '到期日期', '状态', '提醒状态'],
-    ...certificates.map((c) => [c.name, facilities.find((x) => x.id === c.facilityId)?.type ?? '', c.issueDate, c.expiryDate, c.status, c.status === '已过期' ? '已过期' : c.status === '临期' ? '即将到期' : '正常']),
+    ...certificates.map((c) => { const autoStatus = calcCertStatus(c.expiryDate); return [c.name, facilities.find((x) => x.id === c.facilityId)?.type ?? '', c.issueDate, c.expiryDate, autoStatus, autoStatus === '已过期' ? '已过期' : autoStatus === '临期' ? '即将到期' : '正常'] }),
   ]
   const csv = '\uFEFF' + rows.map((r) => r.map(esc).join(',')).join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -198,12 +200,13 @@ function MaintenanceModal({ open, onClose, item }: { open: boolean; onClose: () 
 
 function CertificateModal({ open, onClose, item }: { open: boolean; onClose: () => void; item: Certificate | null }) {
   const { facilities, addCertificate, updateCertificate } = useFireStore()
-  const d = { facilityId: '', name: '', issueDate: '', expiryDate: '', status: '正常' as Certificate['status'] }
+  const d = { facilityId: '', name: '', issueDate: '', expiryDate: '' }
   const [form, setForm] = useState(d)
-  useEffect(() => { setForm(item ? { facilityId: item.facilityId, name: item.name, issueDate: item.issueDate, expiryDate: item.expiryDate, status: item.status } : d) }, [open])
+  useEffect(() => { setForm(item ? { facilityId: item.facilityId, name: item.name, issueDate: item.issueDate, expiryDate: item.expiryDate } : d) }, [open])
   const submit = () => {
     if (!form.facilityId || !form.name || !form.issueDate || !form.expiryDate) return
-    if (item) updateCertificate(item.id, form); else addCertificate({ id: `c${Date.now()}`, ...form })
+    const status = calcCertStatus(form.expiryDate)
+    if (item) updateCertificate(item.id, { ...form, status }); else addCertificate({ id: `c${Date.now()}`, ...form, status })
     onClose()
   }
   return (
@@ -216,9 +219,7 @@ function CertificateModal({ open, onClose, item }: { open: boolean; onClose: () 
         <input className={ic} placeholder="证书名称" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
         <input type="date" className={ic} value={form.issueDate} onChange={e => setForm(f => ({ ...f, issueDate: e.target.value }))} />
         <input type="date" className={ic} value={form.expiryDate} onChange={e => setForm(f => ({ ...f, expiryDate: e.target.value }))} />
-        <select className={ic} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as Certificate['status'] }))}>
-          {['正常', '临期', '已过期'].map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+        {form.expiryDate && <p className="text-xs text-slate-500">系统将按到期日期自动判断状态：{calcCertStatus(form.expiryDate)}</p>}
         <button onClick={submit} className={bc}>保存</button>
       </div>
     </Modal>
@@ -226,7 +227,11 @@ function CertificateModal({ open, onClose, item }: { open: boolean; onClose: () 
 }
 
 export default function Archives() {
-  const [activeTab, setActiveTab] = useState<TabKey>('buildings')
+  const [searchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const initialTab = tabs.find(t => t.key === tabParam)?.key ?? 'buildings'
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab as TabKey)
+  useEffect(() => { if (tabParam && tabs.some(t => t.key === tabParam)) setActiveTab(tabParam as TabKey) }, [tabParam])
   const [buildingFilter, setBuildingFilter] = useState('')
   const [exportMonth, setExportMonth] = useState('')
   const { buildings, facilities, maintenanceRecords, certificates, persons } = useFireStore()
@@ -243,21 +248,19 @@ export default function Archives() {
   const expiryAlerts = useMemo(() => {
     const alerts: { type: 'cert' | 'maintenance'; label: string; detail: string; status: string }[] = []
     certificates.forEach(c => {
-      if (c.status === '临期' || c.status === '已过期') {
+      const s = calcCertStatus(c.expiryDate)
+      if (s !== '正常') {
         const f = getFacility(c.facilityId)
         const b = f ? getBuilding(f.buildingId) : null
-        alerts.push({ type: 'cert', label: c.name, detail: `${b?.name ?? '-'} · 到期: ${c.expiryDate}`, status: c.status })
+        alerts.push({ type: 'cert', label: c.name, detail: `${b?.name ?? '-'} · 到期: ${c.expiryDate}`, status: s })
       }
     })
     maintenanceRecords.forEach(m => {
-      const next = new Date(m.nextDate).getTime()
-      const now = Date.now()
-      const overdue = next < now
-      const nearExpiry = !overdue && (next - now) < 30 * 86400000
-      if (overdue || nearExpiry) {
+      const s = calcMaintenanceStatus(m.nextDate)
+      if (s !== '正常') {
         const f = getFacility(m.facilityId)
         const b = f ? getBuilding(f.buildingId) : null
-        alerts.push({ type: 'maintenance', label: m.content, detail: `${b?.name ?? '-'} · 下次维保: ${m.nextDate}`, status: overdue ? '已过期' : '临期' })
+        alerts.push({ type: 'maintenance', label: m.content, detail: `${b?.name ?? '-'} · 下次维保: ${m.nextDate}`, status: s })
       }
     })
     return alerts
@@ -402,11 +405,11 @@ export default function Archives() {
                 <table className="w-full text-sm"><thead className="bg-slate-50"><tr>
                   <th className={thCls}>证书名称</th><th className={thCls}>关联设施</th><th className={thCls}>签发日期</th><th className={thCls}>到期日期</th><th className={thCls}>状态</th><th className={thCls}>操作</th>
                 </tr></thead><tbody>
-                  {certificates.map(c => { const f = getFacility(c.facilityId); return (
-                    <tr key={c.id} className={`border-t border-slate-100 ${certRowBg[c.status]}`}>
+                  {certificates.map(c => { const f = getFacility(c.facilityId); const autoStatus = calcCertStatus(c.expiryDate); return (
+                    <tr key={c.id} className={`border-t border-slate-100 ${certRowBg[autoStatus]}`}>
                       <td className={tdCls}>{c.name}</td><td className={tdCls}>{f?.type ?? ''}</td>
                       <td className={tdMuted}>{c.issueDate}</td><td className={tdMuted}>{c.expiryDate}</td>
-                      <td className="px-4 py-3"><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyle[c.status]}`}>{c.status}</span></td>
+                      <td className="px-4 py-3"><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyle[autoStatus]}`}>{autoStatus}</span></td>
                       <td className="px-4 py-3"><button onClick={() => setCm({ open: true, item: c })} className={ebc}><Pencil size={12} />编辑</button></td>
                     </tr>
                   )})}

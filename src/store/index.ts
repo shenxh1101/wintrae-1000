@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import type {
   Hazard,
+  HazardEvent,
   InspectionRecord,
   Drill,
+  DrillIssue,
   Building,
   FireFacility,
   MaintenanceRecord,
@@ -74,7 +76,8 @@ interface FireStore extends PersistedData {
   updateDrill: (id: string, updates: Partial<Drill>) => void
   toggleDrillCheckIn: (drillId: string, participantId: string) => void
   updateDrillScore: (drillId: string, itemIndex: number, score: number) => void
-  addDrillIssue: (drillId: string, issue: string) => void
+  addDrillIssue: (drillId: string, issue: DrillIssue) => void
+  updateDrillIssue: (drillId: string, issueId: string, updates: Partial<DrillIssue>) => void
   addBuilding: (building: Building) => void
   updateBuilding: (id: string, updates: Partial<Building>) => void
   addFacility: (facility: FireFacility) => void
@@ -180,6 +183,22 @@ export const useFireStore = create<FireStore>((set) => ({
     set((state) => {
       const drills = state.drills.map((d) =>
         d.id === drillId ? { ...d, issues: [...d.issues, issue] } : d
+      )
+      persist({ drills })
+      return { drills }
+    }),
+
+  updateDrillIssue: (drillId, issueId, updates) =>
+    set((state) => {
+      const drills = state.drills.map((d) =>
+        d.id === drillId
+          ? {
+              ...d,
+              issues: d.issues.map((issue) =>
+                issue.id === issueId ? { ...issue, ...updates } : issue
+              ),
+            }
+          : d
       )
       persist({ drills })
       return { drills }

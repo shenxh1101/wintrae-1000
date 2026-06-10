@@ -8,7 +8,7 @@ import {
   Play, Flag, FileText, User,
 } from 'lucide-react'
 import { useFireStore } from '@/store'
-import type { Drill, DrillScore } from '@/types'
+import type { Drill, DrillScore, DrillIssue } from '@/types'
 
 const typeBadge: Record<Drill['type'], string> = {
   '灭火演练': 'bg-red-100 text-red-700',
@@ -35,12 +35,14 @@ const tabs = ['签到', '评分', '问题'] as const
 const steps: Drill['status'][] = ['计划中', '进行中', '已完成']
 
 export default function Drills() {
-  const { drills, buildings, persons, addDrill, updateDrill, toggleDrillCheckIn, updateDrillScore, addDrillIssue } = useFireStore()
+  const { drills, buildings, persons, addDrill, updateDrill, toggleDrillCheckIn, updateDrillScore, addDrillIssue, updateDrillIssue } = useFireStore()
   const [searchParams] = useSearchParams()
   const [selectedDrillId, setSelectedDrillId] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [activeTab, setActiveTab] = useState<typeof tabs[number]>('签到')
-  const [newIssue, setNewIssue] = useState('')
+  const [issueText, setIssueText] = useState('')
+  const [issueSuggestion, setIssueSuggestion] = useState('')
+  const [issueAssigneeId, setIssueAssigneeId] = useState(persons[0]?.id ?? '')
   const [formType, setFormType] = useState<Drill['type']>('灭火演练')
   const [formBuildingId, setFormBuildingId] = useState(buildings[0]?.id ?? '')
   const [formDate, setFormDate] = useState('')
@@ -55,6 +57,7 @@ export default function Drills() {
 
   const selectedDrill = drills.find((d) => d.id === selectedDrillId) ?? null
   const buildingName = (id: string) => buildings.find((b) => b.id === id)?.name ?? '未知'
+  const personName = (id: string) => persons.find((p) => p.id === id)?.name ?? '未知'
 
   const handleCreate = () => {
     if (!formDate) return
@@ -71,6 +74,21 @@ export default function Drills() {
     addDrill(drill)
     setShowCreateModal(false)
     setFormDate('')
+  }
+
+  const handleAddIssue = () => {
+    if (!issueText.trim()) return
+    const issue: DrillIssue = {
+      id: `di${Date.now()}`,
+      text: issueText.trim(),
+      suggestion: issueSuggestion.trim(),
+      assigneeId: issueAssigneeId,
+      completed: false,
+    }
+    addDrillIssue(selectedDrill!.id, issue)
+    setIssueText('')
+    setIssueSuggestion('')
+    setIssueAssigneeId(persons[0]?.id ?? '')
   }
 
   const checkedIn = selectedDrill?.participants.filter((p) => p.checkedIn).length ?? 0
@@ -106,6 +124,7 @@ export default function Drills() {
           const dMaxTotal = drill.scores.reduce((s, sc) => s + sc.maxScore, 0) || 100
           const dScorePct = Math.round((dScoreTotal / dMaxTotal) * 100)
           const dPartRate = Math.round((dCheckedIn / dTotal) * 100)
+          const dCompletedIssues = drill.issues.filter((iss) => iss.completed).length
           return (
             <motion.div
               key={drill.id}
@@ -139,7 +158,7 @@ export default function Drills() {
                     <Star className="h-3 w-3" />评分: {dScorePct}%
                   </span>
                   <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700">
-                    <AlertTriangle className="h-3 w-3" />问题: {drill.issues.length}项
+                    <AlertTriangle className="h-3 w-3" />整改: {dCompletedIssues}/{drill.issues.length}
                   </span>
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
                     <UserCheck className="h-3 w-3" />参与: {dPartRate}%
@@ -288,30 +307,72 @@ export default function Drills() {
                   {selectedDrill.issues.length === 0 && (
                     <p className="text-sm text-slate-400 text-center py-4">暂无问题记录</p>
                   )}
-                  {selectedDrill.issues.map((issue, i) => (
-                    <div key={i} className="flex items-start gap-2 rounded-lg bg-amber-50 p-3">
-                      <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
-                      <span className="text-sm text-slate-700">{issue}</span>
+                  {selectedDrill.issues.map((issue) => (
+                    <div key={issue.id} className={`rounded-lg border p-3 ${issue.completed ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                      <div className="flex items-start gap-2">
+                        {issue.completed ? (
+                          <CheckCircle className="h-4 w-4 text-emerald-500 mt-0.5 flex-shrink-0" />
+                        ) : (
+                          <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <span className={`text-sm text-slate-700 ${issue.completed ? 'line-through' : ''}`}>{issue.text}</span>
+                          {issue.suggestion && (
+                            <p className="text-xs text-slate-500 mt-1">建议：{issue.suggestion}</p>
+                          )}
+                          <div className="flex items-center gap-2 mt-1.5">
+                            <User className="h-3 w-3 text-slate-400" />
+                            <span className="text-xs text-slate-500">{personName(issue.assigneeId)}</span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => updateDrillIssue(selectedDrill.id, issue.id, { completed: !issue.completed })}
+                          className={`rounded-md px-2.5 py-1 text-xs font-medium flex-shrink-0 ${
+                            issue.completed
+                              ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                              : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                          }`}
+                        >
+                          {issue.completed ? '已完成' : '待整改'}
+                        </button>
+                      </div>
                     </div>
                   ))}
-                  <div className="flex gap-2 pt-2">
+                  <div className="space-y-2 pt-2 border-t border-slate-100">
                     <input
-                      value={newIssue}
-                      onChange={(e) => setNewIssue(e.target.value)}
-                      placeholder="输入问题..."
-                      className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-fire-500 focus:outline-none"
+                      value={issueText}
+                      onChange={(e) => setIssueText(e.target.value)}
+                      placeholder="问题内容"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-fire-500 focus:outline-none"
                     />
-                    <button
-                      onClick={() => {
-                        if (newIssue.trim()) {
-                          addDrillIssue(selectedDrill.id, newIssue.trim())
-                          setNewIssue('')
-                        }
-                      }}
-                      className="rounded-lg bg-fire-600 px-4 py-2 text-sm font-medium text-white hover:bg-fire-700"
-                    >
-                      添加
-                    </button>
+                    <input
+                      value={issueSuggestion}
+                      onChange={(e) => setIssueSuggestion(e.target.value)}
+                      placeholder="整改建议"
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-fire-500 focus:outline-none"
+                    />
+                    <div className="flex gap-2">
+                      <select
+                        value={issueAssigneeId}
+                        onChange={(e) => setIssueAssigneeId(e.target.value)}
+                        className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-fire-500 focus:outline-none"
+                      >
+                        {persons.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={handleAddIssue}
+                        disabled={!issueText.trim()}
+                        className={`rounded-lg px-4 py-2 text-sm font-medium ${
+                          issueText.trim()
+                            ? 'bg-fire-600 text-white hover:bg-fire-700'
+                            : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                        }`}
+                      >
+                        添加
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -419,15 +480,35 @@ export default function Drills() {
 
                     {selectedDrill.issues.length > 0 && (
                       <div className="bg-white rounded-lg border border-slate-200 p-4 mb-4">
-                        <h4 className="text-sm font-semibold text-slate-700 mb-3">问题清单</h4>
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-sm font-semibold text-slate-700">问题整改跟踪</h4>
+                          <span className="text-xs text-slate-500">
+                            {selectedDrill.issues.filter((iss) => iss.completed).length}/{selectedDrill.issues.length} 已完成
+                            ({Math.round((selectedDrill.issues.filter((iss) => iss.completed).length / selectedDrill.issues.length) * 100)}%)
+                          </span>
+                        </div>
                         <div className="space-y-2">
-                          {selectedDrill.issues.map((issue, i) => (
-                            <div key={i} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                              <div className="flex items-start gap-2">
-                                <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 flex-shrink-0" />
-                                <span className="text-sm text-slate-700">{issue}</span>
+                          {selectedDrill.issues.map((issue) => (
+                            <div key={issue.id} className={`rounded-lg border p-3 ${issue.completed ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <span className={`text-sm text-slate-700 ${issue.completed ? 'line-through' : ''}`}>{issue.text}</span>
+                                  {issue.suggestion && (
+                                    <p className="text-xs text-slate-500 mt-1">建议：{issue.suggestion}</p>
+                                  )}
+                                  <div className="flex items-center gap-2 mt-1.5">
+                                    <User className="h-3 w-3 text-slate-400" />
+                                    <span className="text-xs text-slate-500">{personName(issue.assigneeId)}</span>
+                                  </div>
+                                </div>
+                                <span className={`rounded-full px-2 py-0.5 text-xs font-medium flex-shrink-0 ${
+                                  issue.completed
+                                    ? 'bg-emerald-100 text-emerald-700'
+                                    : 'bg-amber-100 text-amber-700'
+                                }`}>
+                                  {issue.completed ? '已完成' : '待整改'}
+                                </span>
                               </div>
-                              <p className="text-xs text-slate-500 mt-1.5 pl-6">建议：及时整改并复检</p>
                             </div>
                           ))}
                         </div>

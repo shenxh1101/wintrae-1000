@@ -8,6 +8,15 @@ export interface Building {
   responsiblePersonId: string
 }
 
+export interface HazardEvent {
+  type: '登记' | '分派' | '提交整改' | '复查通过' | '复查不通过'
+  time: string
+  description: string
+  photos: string[]
+  operatorId: string
+  deadline?: string
+}
+
 export interface Hazard {
   id: string
   buildingId: string
@@ -21,6 +30,7 @@ export interface Hazard {
   assigneeId: string
   rectification?: Rectification
   rechecks: Recheck[]
+  events: HazardEvent[]
 }
 
 export interface Rectification {
@@ -29,6 +39,7 @@ export interface Rectification {
   requirement: string
   completedAt?: string
   photos: string[]
+  result?: string
 }
 
 export interface Recheck {
@@ -71,6 +82,14 @@ export interface InspectionItem {
   remark?: string
 }
 
+export interface DrillIssue {
+  id: string
+  text: string
+  suggestion: string
+  assigneeId: string
+  completed: boolean
+}
+
 export interface Drill {
   id: string
   type: '灭火演练' | '疏散演练' | '综合演练'
@@ -79,7 +98,7 @@ export interface Drill {
   status: '计划中' | '进行中' | '已完成'
   participants: DrillParticipant[]
   scores: DrillScore[]
-  issues: string[]
+  issues: DrillIssue[]
 }
 
 export interface DrillParticipant {
@@ -138,4 +157,18 @@ export interface AlarmEvent {
   message: string
   time: string
   level: '低' | '中' | '高'
+}
+
+export function calcCertStatus(expiryDate: string): Certificate['status'] {
+  const diff = new Date(expiryDate).getTime() - Date.now()
+  if (diff < 0) return '已过期'
+  if (diff < 30 * 86400000) return '临期'
+  return '正常'
+}
+
+export function calcMaintenanceStatus(nextDate: string): '正常' | '临期' | '已过期' {
+  const diff = new Date(nextDate).getTime() - Date.now()
+  if (diff < 0) return '已过期'
+  if (diff < 30 * 86400000) return '临期'
+  return '正常'
 }

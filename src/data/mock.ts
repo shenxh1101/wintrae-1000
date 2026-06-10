@@ -1,9 +1,11 @@
 import type {
   Building,
   Hazard,
+  HazardEvent,
   InspectionRoute,
   InspectionRecord,
   Drill,
+  DrillIssue,
   FireFacility,
   MaintenanceRecord,
   Certificate,
@@ -32,13 +34,22 @@ export const hazards: Hazard[] = [
     level: '较大', status: '整改中', photos: [], createdAt: '2026-06-08', deadline: '2026-06-15',
     assigneeId: 'p1', rectification: { assigneeId: 'p1', deadline: '2026-06-15', requirement: '更换灭火器并更新台账', photos: [] },
     rechecks: [],
+    events: [
+      { type: '登记', time: '2026-06-08', description: '灭火器过期未更换，压力表指针在红区', photos: [], operatorId: 'p4' },
+      { type: '分派', time: '2026-06-08', description: '更换灭火器并更新台账', photos: [], operatorId: 'p1', deadline: '2026-06-15' },
+    ],
   },
   {
     id: 'h2', buildingId: 'b3', location: '1层生产区出口', description: '安全通道被货物堵塞，影响疏散',
     level: '重大', status: '待复查', photos: [], createdAt: '2026-06-05', deadline: '2026-06-10',
     assigneeId: 'p1',
-    rectification: { assigneeId: 'p1', deadline: '2026-06-10', requirement: '清理通道，设置警示标识', completedAt: '2026-06-09', photos: [] },
+    rectification: { assigneeId: 'p1', deadline: '2026-06-10', requirement: '清理通道，设置警示标识', completedAt: '2026-06-09', photos: [], result: '已清理通道并设置警示标识' },
     rechecks: [],
+    events: [
+      { type: '登记', time: '2026-06-05', description: '安全通道被货物堵塞，影响疏散', photos: [], operatorId: 'p4' },
+      { type: '分派', time: '2026-06-05', description: '清理通道，设置警示标识', photos: [], operatorId: 'p1', deadline: '2026-06-10' },
+      { type: '提交整改', time: '2026-06-09', description: '已清理通道并设置警示标识', photos: [], operatorId: 'p1' },
+    ],
   },
   {
     id: 'h3', buildingId: 'b2', location: '5层机房', description: '烟感报警器故障，无法正常联动',
@@ -46,18 +57,31 @@ export const hazards: Hazard[] = [
     assigneeId: 'p2',
     rectification: { assigneeId: 'p2', deadline: '2026-06-05', requirement: '更换烟感报警器并测试联动', photos: [] },
     rechecks: [],
+    events: [
+      { type: '登记', time: '2026-05-28', description: '烟感报警器故障，无法正常联动', photos: [], operatorId: 'p4' },
+      { type: '分派', time: '2026-05-28', description: '更换烟感报警器并测试联动', photos: [], operatorId: 'p2', deadline: '2026-06-05' },
+    ],
   },
   {
     id: 'h4', buildingId: 'b4', location: '1层仓库A区', description: '消防栓箱门损坏无法正常开启',
     level: '一般', status: '待分派', photos: [], createdAt: '2026-06-09', deadline: '',
     assigneeId: '', rechecks: [],
+    events: [
+      { type: '登记', time: '2026-06-09', description: '消防栓箱门损坏无法正常开启', photos: [], operatorId: 'p4' },
+    ],
   },
   {
     id: 'h5', buildingId: 'b5', location: '2层会议室', description: '应急灯不亮，断电后无法提供照明',
     level: '较大', status: '已关闭', photos: [], createdAt: '2026-06-01', deadline: '2026-06-07',
     assigneeId: 'p2',
-    rectification: { assigneeId: 'p2', deadline: '2026-06-07', requirement: '更换应急灯电池', completedAt: '2026-06-06', photos: [] },
+    rectification: { assigneeId: 'p2', deadline: '2026-06-07', requirement: '更换应急灯电池', completedAt: '2026-06-06', photos: [], result: '已更换应急灯电池' },
     rechecks: [{ id: 'r1', hazardId: 'h5', result: '通过', opinion: '应急灯已正常工作', photos: [], createdAt: '2026-06-07' }],
+    events: [
+      { type: '登记', time: '2026-06-01', description: '应急灯不亮，断电后无法提供照明', photos: [], operatorId: 'p4' },
+      { type: '分派', time: '2026-06-01', description: '更换应急灯电池', photos: [], operatorId: 'p2', deadline: '2026-06-07' },
+      { type: '提交整改', time: '2026-06-06', description: '已更换应急灯电池', photos: [], operatorId: 'p2' },
+      { type: '复查通过', time: '2026-06-07', description: '应急灯已正常工作', photos: [], operatorId: 'p4' },
+    ],
   },
   {
     id: 'h6', buildingId: 'b1', location: '8层西侧楼梯间', description: '防火门闭门器损坏，无法自动关闭',
@@ -65,6 +89,10 @@ export const hazards: Hazard[] = [
     assigneeId: 'p1',
     rectification: { assigneeId: 'p1', deadline: '2026-06-14', requirement: '更换闭门器', photos: [] },
     rechecks: [],
+    events: [
+      { type: '登记', time: '2026-06-07', description: '防火门闭门器损坏，无法自动关闭', photos: [], operatorId: 'p4' },
+      { type: '分派', time: '2026-06-07', description: '更换闭门器', photos: [], operatorId: 'p1', deadline: '2026-06-14' },
+    ],
   },
 ]
 
@@ -167,7 +195,7 @@ export const drills: Drill[] = [
       { item: '人员疏散', maxScore: 30, actualScore: 0 },
       { item: '现场指挥', maxScore: 20, actualScore: 0 },
     ],
-    issues: [],
+    issues: [] as DrillIssue[],
   },
   {
     id: 'd2', type: '疏散演练', buildingId: 'b3', scheduledAt: '2026-06-05 10:00', status: '已完成',
@@ -183,7 +211,10 @@ export const drills: Drill[] = [
       { item: '人员疏散', maxScore: 30, actualScore: 28 },
       { item: '现场指挥', maxScore: 20, actualScore: 16 },
     ],
-    issues: ['3层西侧疏散指示灯不亮', '部分人员未走指定路线'],
+    issues: [
+      { id: 'di1', text: '3层西侧疏散指示灯不亮', suggestion: '更换疏散指示灯', assigneeId: 'p1', completed: false },
+      { id: 'di2', text: '部分人员未走指定路线', suggestion: '加强疏散培训', assigneeId: 'p4', completed: true },
+    ] as DrillIssue[],
   },
   {
     id: 'd3', type: '综合演练', buildingId: 'b2', scheduledAt: '2026-06-12 09:00', status: '进行中',
@@ -198,7 +229,7 @@ export const drills: Drill[] = [
       { item: '人员疏散', maxScore: 30, actualScore: 0 },
       { item: '现场指挥', maxScore: 20, actualScore: 0 },
     ],
-    issues: [],
+    issues: [] as DrillIssue[],
   },
 ]
 
