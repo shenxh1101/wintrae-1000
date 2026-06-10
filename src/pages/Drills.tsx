@@ -4,6 +4,7 @@ import { PieChart, Pie, Cell } from 'recharts'
 import {
   Plus, Calendar, Users, Star, AlertTriangle,
   CheckCircle, Clock, ChevronRight, Flame, ArrowRight, UserCheck,
+  Play, Flag,
 } from 'lucide-react'
 import { useFireStore } from '@/store'
 import type { Drill, DrillScore } from '@/types'
@@ -30,6 +31,7 @@ const defaultScores: DrillScore[] = [
   { item: '现场指挥', maxScore: 25, actualScore: 0 },
 ]
 const tabs = ['签到', '评分', '问题'] as const
+const steps: Drill['status'][] = ['计划中', '进行中', '已完成']
 
 export default function Drills() {
   const { drills, buildings, persons, addDrill, updateDrill, toggleDrillCheckIn, updateDrillScore, addDrillIssue } = useFireStore()
@@ -71,6 +73,10 @@ export default function Drills() {
   const totalScore = selectedDrill?.scores.reduce((s, sc) => s + sc.actualScore, 0) ?? 0
   const maxTotal = selectedDrill?.scores.reduce((s, sc) => s + sc.maxScore, 0) ?? 100
   const scorePct = Math.round((totalScore / maxTotal) * 100)
+  const participationRate = total > 0 ? Math.round((checkedIn / total) * 100) : 0
+
+  const currentStepIndex = selectedDrill ? steps.indexOf(selectedDrill.status) : 0
+  const canComplete = checkedIn >= 1
 
   return (
     <div className="space-y-6">
@@ -127,6 +133,51 @@ export default function Drills() {
             exit={{ opacity: 0, y: 20 }}
             className="bg-white rounded-xl shadow-sm"
           >
+            <div className="p-5 pb-4">
+              <div className="flex items-center justify-center gap-0">
+                {steps.map((step, i) => {
+                  const isCompleted = i < currentStepIndex
+                  const isCurrent = i === currentStepIndex
+                  return (
+                    <div key={step} className="flex items-center">
+                      <div className="flex flex-col items-center">
+                        <motion.div
+                          animate={{
+                            scale: isCurrent ? 1.15 : 1,
+                            backgroundColor: isCompleted ? '#059669' : isCurrent ? '#DC2626' : '#E2E8F0',
+                          }}
+                          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                          className="flex items-center justify-center w-8 h-8 rounded-full"
+                        >
+                          {isCompleted ? (
+                            <CheckCircle className="h-4 w-4 text-white" />
+                          ) : (
+                            <span className={`text-xs font-bold ${isCurrent ? 'text-white' : 'text-slate-400'}`}>
+                              {i + 1}
+                            </span>
+                          )}
+                        </motion.div>
+                        <motion.span
+                          animate={{ color: isCompleted ? '#059669' : isCurrent ? '#DC2626' : '#94A3B8' }}
+                          className="mt-1 text-xs font-medium"
+                        >
+                          {step}
+                        </motion.span>
+                      </div>
+                      {i < steps.length - 1 && (
+                        <motion.div
+                          animate={{
+                            backgroundColor: i < currentStepIndex ? '#059669' : '#E2E8F0',
+                          }}
+                          className="w-16 h-0.5 mx-2 mb-4"
+                        />
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
             <div className="flex border-b">
               {tabs.map((tab) => (
                 <button
@@ -242,25 +293,73 @@ export default function Drills() {
               )}
             </div>
 
-            {selectedDrill.status === '已完成' && (
-              <div className="border-t p-5 bg-slate-50 rounded-b-xl">
-                <h3 className="text-sm font-semibold text-slate-700 mb-3">演练总结</h3>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="text-center">
-                    <p className="text-2xl font-bold text-fire-600">{scorePct}%</p>
-                    <p className="text-xs text-slate-400">总评分</p>
+            <AnimatePresence mode="wait">
+              {selectedDrill.status === '计划中' && (
+                <motion.div
+                  key="start-btn"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="border-t px-5 py-4"
+                >
+                  <button
+                    onClick={() => updateDrill(selectedDrill.id, { status: '进行中' })}
+                    className="w-full flex items-center justify-center gap-2 rounded-lg bg-fire-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-fire-700 transition-colors"
+                  >
+                    <Play className="h-4 w-4" /> 开始演练
+                  </button>
+                </motion.div>
+              )}
+              {selectedDrill.status === '进行中' && (
+                <motion.div
+                  key="complete-btn"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="border-t px-5 py-4"
+                >
+                  <button
+                    onClick={() => updateDrill(selectedDrill.id, { status: '已完成' })}
+                    disabled={!canComplete}
+                    className={`w-full flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
+                      canComplete
+                        ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                        : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                    }`}
+                  >
+                    <Flag className="h-4 w-4" /> 完成演练
+                    {!canComplete && <span className="text-xs">(需至少1人签到)</span>}
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <AnimatePresence>
+              {selectedDrill.status === '已完成' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="border-t p-5 bg-slate-50 rounded-b-xl"
+                >
+                  <h3 className="text-sm font-semibold text-slate-700 mb-3">演练总结</h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="text-center">
+                      <p className="text-2xl font-bold text-fire-600">{scorePct}%</p>
+                      <p className="text-xs text-slate-400">总评分</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-2xl font-bold text-amber-600">{selectedDrill.issues.length}</p>
+                      <p className="text-xs text-slate-400">问题数</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-2xl font-bold text-emerald-600">{participationRate}%</p>
+                      <p className="text-xs text-slate-400">参与率 ({checkedIn}/{total})</p>
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <p className="text-2xl font-bold text-amber-600">{selectedDrill.issues.length}</p>
-                    <p className="text-xs text-slate-400">问题数</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-2xl font-bold text-emerald-600">{checkedIn}/{total}</p>
-                    <p className="text-xs text-slate-400">参与率</p>
-                  </div>
-                </div>
-              </div>
-            )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>

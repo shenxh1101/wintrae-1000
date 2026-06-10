@@ -1,8 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import {
-  Plus, Search, AlertTriangle, Camera,
-} from 'lucide-react'
+import { Plus, Search, AlertTriangle, Camera, Image, X } from 'lucide-react'
 import { useFireStore } from '@/store'
 import type { Hazard } from '@/types'
 
@@ -23,6 +21,59 @@ function deadlineInfo(deadline: string) {
   return { urgent: days <= 3 && days > 0, overdue: days <= 0 }
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+function PhotoUploader({ photos, onPhotosChange }: { photos: string[]; onPhotosChange: (p: string[]) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const handleFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+    const newPhotos: string[] = [...photos]
+    for (let i = 0; i < files.length; i++) {
+      const dataUrl = await readFileAsDataUrl(files[i])
+      newPhotos.push(dataUrl)
+    }
+    onPhotosChange(newPhotos)
+    if (inputRef.current) inputRef.current.value = ''
+  }
+  const removePhoto = (idx: number) => {
+    onPhotosChange(photos.filter((_, i) => i !== idx))
+  }
+  return (
+    <div className="space-y-2">
+      <input ref={inputRef} type="file" accept="image/*" multiple className="hidden" onChange={handleFiles} />
+      <div
+        onClick={() => inputRef.current?.click()}
+        className="flex cursor-pointer items-center justify-center rounded-lg border-2 border-dashed border-slate-200 py-4 text-slate-400 hover:border-fire-300 hover:text-fire-500 transition-colors"
+      >
+        <Camera className="mr-2 h-5 w-5" />点击选择照片
+      </div>
+      {photos.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {photos.map((src, i) => (
+            <div key={i} className="relative h-16 w-16">
+              <img src={src} alt="" className="h-16 w-16 rounded-lg object-cover border border-slate-200" />
+              <button
+                onClick={() => removePhoto(i)}
+                className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Modal({ open, onClose, title, children }: { open: boolean; onClose: () => void; title: string; children: React.ReactNode }) {
   return (
     <AnimatePresence>
@@ -30,7 +81,7 @@ function Modal({ open, onClose, title, children }: { open: boolean; onClose: () 
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-xl" onClick={e => e.stopPropagation()}>
             <h3 className="mb-4 text-lg font-semibold text-slate-800">{title}</h3>
             {children}
           </motion.div>
@@ -43,10 +94,12 @@ function Modal({ open, onClose, title, children }: { open: boolean; onClose: () 
 function RegisterModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { buildings, addHazard } = useFireStore()
   const [form, setForm] = useState({ buildingId: '', location: '', description: '', level: '一般' as Hazard['level'] })
+  const [photos, setPhotos] = useState<string[]>([])
   const submit = () => {
     if (!form.buildingId || !form.location || !form.description) return
-    addHazard({ id: `h${Date.now()}`, ...form, status: '待分派', photos: [], createdAt: new Date().toISOString().slice(0, 10), deadline: '', assigneeId: '', rechecks: [] })
+    addHazard({ id: `h${Date.now()}`, ...form, status: '待分派', photos, createdAt: new Date().toISOString().slice(0, 10), deadline: '', assigneeId: '', rechecks: [] })
     setForm({ buildingId: '', location: '', description: '', level: '一般' })
+    setPhotos([])
     onClose()
   }
   return (
@@ -65,9 +118,7 @@ function RegisterModal({ open, onClose }: { open: boolean; onClose: () => void }
           onChange={e => setForm(f => ({ ...f, level: e.target.value as Hazard['level'] }))}>
           {levelList.filter(l => l !== '全部').map(l => <option key={l} value={l}>{l}</option>)}
         </select>
-        <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-slate-200 py-6 text-slate-400">
-          <Camera className="mr-2 h-5 w-5" />上传照片
-        </div>
+        <PhotoUploader photos={photos} onPhotosChange={setPhotos} />
         <button onClick={submit} className="w-full rounded-lg bg-fire-600 py-2 text-sm font-medium text-white hover:bg-fire-700">提交</button>
       </div>
     </Modal>
@@ -107,14 +158,16 @@ function AssignModal({ open, onClose, hazard }: { open: boolean; onClose: () => 
 function RecheckModal({ open, onClose, hazard }: { open: boolean; onClose: () => void; hazard: Hazard | null }) {
   const { updateHazard } = useFireStore()
   const [form, setForm] = useState({ result: '通过' as '通过' | '不通过', opinion: '' })
+  const [photos, setPhotos] = useState<string[]>([])
   const submit = () => {
     if (!hazard) return
     const newStatus = form.result === '通过' ? '已关闭' : '整改中'
     updateHazard(hazard.id, {
       status: newStatus,
-      rechecks: [...hazard.rechecks, { id: `r${Date.now()}`, hazardId: hazard.id, result: form.result, opinion: form.opinion, photos: [], createdAt: new Date().toISOString().slice(0, 10) }],
+      rechecks: [...hazard.rechecks, { id: `r${Date.now()}`, hazardId: hazard.id, result: form.result, opinion: form.opinion, photos, createdAt: new Date().toISOString().slice(0, 10) }],
     })
     setForm({ result: '通过', opinion: '' })
+    setPhotos([])
     onClose()
   }
   return (
@@ -127,10 +180,37 @@ function RecheckModal({ open, onClose, hazard }: { open: boolean; onClose: () =>
         </select>
         <textarea className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" rows={3} placeholder="复查意见"
           value={form.opinion} onChange={e => setForm(f => ({ ...f, opinion: e.target.value }))} />
-        <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-slate-200 py-6 text-slate-400">
-          <Camera className="mr-2 h-5 w-5" />上传照片
-        </div>
+        <PhotoUploader photos={photos} onPhotosChange={setPhotos} />
         <button onClick={submit} className="w-full rounded-lg bg-fire-600 py-2 text-sm font-medium text-white hover:bg-fire-700">提交复查</button>
+      </div>
+    </Modal>
+  )
+}
+
+function HazardDetailModal({ open, onClose, hazard }: { open: boolean; onClose: () => void; hazard: Hazard | null }) {
+  const { buildings } = useFireStore()
+  if (!hazard) return null
+  const buildingName = buildings.find(b => b.id === hazard.buildingId)?.name ?? '-'
+  const allPhotos = [...hazard.photos, ...hazard.rechecks.flatMap(r => r.photos)]
+  return (
+    <Modal open={open} onClose={onClose} title="隐患详情">
+      <div className="space-y-3 text-sm">
+        <div className="flex justify-between"><span className="text-slate-500">楼栋</span><span className="font-medium">{buildingName}</span></div>
+        <div className="flex justify-between"><span className="text-slate-500">位置</span><span className="font-medium">{hazard.location}</span></div>
+        <div><span className="text-slate-500">描述</span><p className="mt-1 text-slate-700">{hazard.description}</p></div>
+        <div className="flex justify-between"><span className="text-slate-500">等级</span><span className={`status-badge ${levelClass[hazard.level]}`}>{hazard.level}</span></div>
+        <div className="flex justify-between"><span className="text-slate-500">状态</span><span className={`status-badge ${statusClass[hazard.status]}`}>{hazard.status}</span></div>
+        <div className="flex justify-between"><span className="text-slate-500">截止日期</span><span className="font-medium">{hazard.deadline || '-'}</span></div>
+        {allPhotos.length > 0 && (
+          <div>
+            <span className="text-slate-500">照片（{allPhotos.length}张）</span>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {allPhotos.map((src, i) => (
+                <img key={i} src={src} alt="" className="h-16 w-16 rounded-lg object-cover border border-slate-200" />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   )
@@ -145,6 +225,7 @@ export default function Hazards() {
   const [regOpen, setRegOpen] = useState(false)
   const [assignTarget, setAssignTarget] = useState<Hazard | null>(null)
   const [recheckTarget, setRecheckTarget] = useState<Hazard | null>(null)
+  const [detailTarget, setDetailTarget] = useState<Hazard | null>(null)
 
   const buildingMap = useMemo(() => Object.fromEntries(buildings.map(b => [b.id, b.name])), [buildings])
 
@@ -166,18 +247,18 @@ export default function Hazards() {
   const actionBtn = (h: Hazard) => {
     switch (h.status) {
       case '待分派': return <button onClick={() => setAssignTarget(h)} className="rounded-md bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100">分派</button>
-      case '整改中': return <button className="rounded-md bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100">查看</button>
+      case '整改中': return <button onClick={() => setDetailTarget(h)} className="rounded-md bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100">查看</button>
       case '待复查': return <button onClick={() => setRecheckTarget(h)} className="rounded-md bg-purple-50 px-3 py-1 text-xs font-medium text-purple-700 hover:bg-purple-100">复查</button>
-      case '已关闭': return <button className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">查看</button>
+      case '已关闭': return <button onClick={() => setDetailTarget(h)} className="rounded-md bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100">查看</button>
       case '已超期': return <button onClick={() => setAssignTarget(h)} className="rounded-md bg-red-50 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100">催办</button>
     }
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
+    <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
       {urgentCount > 0 && (
         <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
-          className={`mb-6 flex items-center gap-3 rounded-xl px-5 py-3 ${overdueCount > 0 ? 'bg-gradient-to-r from-red-500 to-red-400 text-white' : 'bg-gradient-to-r from-amber-400 to-amber-300 text-amber-900'}`}>
+          className={`flex items-center gap-3 rounded-xl px-5 py-3 ${overdueCount > 0 ? 'bg-gradient-to-r from-red-500 to-red-400 text-white' : 'bg-gradient-to-r from-amber-400 to-amber-300 text-amber-900'}`}>
           <AlertTriangle className="h-5 w-5" />
           <span className="text-sm font-medium">
             {overdueCount > 0 ? `${overdueCount}项隐患已超期，请立即处理！` : `${urgentCount}项隐患即将到期（3天内），请关注！`}
@@ -185,7 +266,7 @@ export default function Hazards() {
         </motion.div>
       )}
 
-      <div className="mb-6 flex items-center justify-between">
+      <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-800">隐患管理</h2>
         <button onClick={() => setRegOpen(true)}
           className="flex items-center gap-2 rounded-lg bg-fire-600 px-4 py-2 text-sm font-medium text-white hover:bg-fire-700">
@@ -193,7 +274,7 @@ export default function Hazards() {
         </button>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-sm" placeholder="搜索隐患..."
@@ -223,6 +304,7 @@ export default function Hazards() {
               <th className="px-4 py-3">描述</th>
               <th className="px-4 py-3">等级</th>
               <th className="px-4 py-3">状态</th>
+              <th className="px-4 py-3">照片</th>
               <th className="px-4 py-3">截止日期</th>
               <th className="px-4 py-3">操作</th>
             </tr>
@@ -230,6 +312,7 @@ export default function Hazards() {
           <tbody>
             {filtered.map(h => {
               const { urgent, overdue } = deadlineInfo(h.deadline)
+              const photoCount = h.photos.length + h.rechecks.flatMap(r => r.photos).length
               return (
                 <tr key={h.id} className="border-b border-slate-50 transition-colors hover:bg-slate-50">
                   <td className="px-4 py-3 font-medium text-slate-700">{buildingMap[h.buildingId] || '-'}</td>
@@ -237,6 +320,15 @@ export default function Hazards() {
                   <td className="max-w-[200px] truncate px-4 py-3 text-slate-600">{h.description}</td>
                   <td className="px-4 py-3"><span className={`status-badge ${levelClass[h.level]}`}>{h.level}</span></td>
                   <td className="px-4 py-3"><span className={`status-badge ${statusClass[h.status]}`}>{h.status}</span></td>
+                  <td className="px-4 py-3">
+                    {photoCount > 0 ? (
+                      <span className="flex items-center gap-1 text-fire-600">
+                        <Image className="h-3.5 w-3.5" />{photoCount}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300">-</span>
+                    )}
+                  </td>
                   <td className={`px-4 py-3 ${overdue ? 'text-red-600 font-medium' : urgent ? 'text-amber-600 font-medium' : 'text-slate-600'}`}>
                     {h.deadline || '-'}
                   </td>
@@ -245,7 +337,7 @@ export default function Hazards() {
               )
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-12 text-center text-slate-400">暂无隐患记录</td></tr>
+              <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-400">暂无隐患记录</td></tr>
             )}
           </tbody>
         </table>
@@ -254,6 +346,7 @@ export default function Hazards() {
       <RegisterModal open={regOpen} onClose={() => setRegOpen(false)} />
       <AssignModal open={!!assignTarget} onClose={() => setAssignTarget(null)} hazard={assignTarget} />
       <RecheckModal open={!!recheckTarget} onClose={() => setRecheckTarget(null)} hazard={recheckTarget} />
-    </div>
+      <HazardDetailModal open={!!detailTarget} onClose={() => setDetailTarget(null)} hazard={detailTarget} />
+    </motion.div>
   )
 }
